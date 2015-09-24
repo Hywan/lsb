@@ -1,0 +1,225 @@
+#!/usr/bin/env php
+<?php
+
+require '/usr/local/lib/Hoa/Core/Core.php';
+
+use Hoa\Console\Console;
+use Hoa\Console\Cursor;
+use Hoa\Console\Window;
+
+class SelectableList
+{
+    /**
+     * State: continue to read.
+     *
+     * @const int
+     */
+    const STATE_CONTINUE = 1;
+
+    /**
+     * State: stop to read.
+     *
+     * @const int
+     */
+    const STATE_BREAK    = 2;
+
+    /**
+     * Current list.
+     *
+     * @var array
+     */
+    protected $_list      = null;
+
+    /**
+     * Current item index.
+     *
+     * @var int
+     */
+    protected $_itemIndex = 0;
+
+    /**
+     * Standard input (either `php://input` or `/dev/tty`).
+     *
+     * @var resource
+     */
+    protected $_stdin     = null;
+
+
+
+    /**
+     * Initialize the readline editor.
+     *
+     * @return  void
+     */
+    public function __construct()
+    {
+        $this->_mapping["\033[A"] = xcallable($this, '_bindArrowUp');
+        $this->_mapping["\033[B"] = xcallable($this, '_bindArrowDown');
+        $this->_mapping["\n"]     = xcallable($this, '_bindEnter');
+
+        return;
+    }
+
+    /**
+     * Read a line from STDIN.
+     *
+     * @param   array  $list    Pre-defined list.
+     * @return  string
+     */
+    public function select(Array $list = [])
+    {
+        $stdin  = Console::getStdin();
+        $direct = Console::isDirect($stdin);
+
+        if (true === Console::isDirect($stdin)) {
+            $this->_list = $list;
+        } else {
+            $this->_list = array_merge(
+                explode("\n", trim(stream_get_contents($stdin))),
+                $list
+            );
+        }
+
+        if (empty($this->_list)) {
+            return;
+        }
+
+        Cursor::colorize('inverse');
+        echo $this->_list[0], "\n";
+        Cursor::colorize('normal');
+
+        for ($i = 1, $max = count($this->_list); $i < $max; ++$i) {
+            echo $this->_list[$i], "\n";
+        }
+
+        Cursor::move('↑', count($this->_list));
+        Cursor::save();
+
+        fclose($stdin);
+        $this->_stdin = Console::getStdin();
+        $read         = [$this->_stdin];
+
+        while (true) {
+            @stream_select($read, $write, $except, 30, 0);
+
+            if (empty($read)) {
+                $read = [$this->_stdin];
+
+                continue;
+            }
+
+            $char = $this->_read(1);
+
+            if ("\033" === $char) {
+                if ('[' === $this->_read(1)) {
+                    $char = "\033[" . $this->_read(1);
+                }
+            }
+
+            $return = $this->_readLine($char);
+
+            if (0 !== ($return & self::STATE_BREAK)) {
+                break;
+            }
+        }
+
+        Cursor::restore();
+        Cursor::clear('↓');
+
+        $item = $this->_list[$this->_itemIndex];
+        echo $item;
+        Window::copy($item);
+
+        return $item;
+    }
+
+    /**
+     * Readline core.
+     *
+     * @param   string  $char    Char.
+     * @return  string
+     */
+    public function _readLine($char)
+    {
+        if (!isset($this->_mapping[$char])) {
+            return;
+        }
+
+        $mapping = $this->_mapping[$char];
+
+        return $mapping($this);
+    }
+
+    /**
+     * Read on STDIN. Not for user.
+     *
+     * @param   int  $length    Length.
+     * @return  string
+     */
+    protected function _read($length = 512)
+    {
+        return fread($this->_stdin, $length);
+    }
+
+    /**
+     * Up arrow binding.
+     *
+     * @param   self  $self    Self.
+     * @return  int
+     */
+    public function _bindArrowUp(self $self)
+    {
+        if (0 < $this->_itemIndex) {
+            Cursor::colorize('normal');
+            echo $this->_list[$this->_itemIndex];
+
+            --$this->_itemIndex;
+            Cursor::move('↑ LEFT');
+            Cursor::colorize('inverse');
+            echo $this->_list[$this->_itemIndex];
+            Cursor::colorize('normal');
+            Cursor::move('LEFT');
+        }
+
+        return static::STATE_CONTINUE;
+    }
+
+    /**
+     * Down arrow binding.
+     *
+     * @param   self  $self    Self.
+     * @return  int
+     */
+    public function _bindArrowDown(self $self)
+    {
+        if (count($this->_list) - 1 > $this->_itemIndex) {
+            Cursor::colorize('normal');
+            echo $this->_list[$this->_itemIndex];
+
+            ++$this->_itemIndex;
+            Cursor::move('↓ LEFT');
+            Cursor::colorize('inverse');
+            echo $this->_list[$this->_itemIndex];
+            Cursor::colorize('normal');
+            Cursor::move('LEFT');
+        }
+
+        return static::STATE_CONTINUE;
+    }
+
+    /**
+     * Enter.
+     *
+     * @param   self  $self    Self.
+     * @return  int
+     */
+    public function _bindEnter(self $self)
+    {
+        return static::STATE_BREAK;
+    }
+}
+
+Console::advancedInteraction(true);
+
+$list = new SelectableList();
+$list->select(range(1024, 1042));
