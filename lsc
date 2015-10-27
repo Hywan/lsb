@@ -5,6 +5,7 @@ require '/usr/local/lib/Hoa/Core/Core.php';
 
 use Hoa\Console\Console;
 use Hoa\Console\Cursor;
+use Hoa\Console\Input;
 use Hoa\Console\Window;
 
 class SelectableList
@@ -38,7 +39,7 @@ class SelectableList
     protected $_itemIndex = 0;
 
     /**
-     * Standard input (either `php://input` or `/dev/tty`).
+     * Standard input.
      *
      * @var resource
      */
@@ -68,14 +69,14 @@ class SelectableList
      */
     public function select(Array $list = [])
     {
-        $stdin  = Console::getStdin();
-        $direct = Console::isDirect($stdin);
+        $stdin  = Console::getInput();
+        $direct = Console::isDirect($stdin->getStream()->getStream());
 
-        if (true === Console::isDirect($stdin)) {
+        if (true === $direct) {
             $this->_list = $list;
         } else {
             $this->_list = array_merge(
-                explode("\n", trim(stream_get_contents($stdin))),
+                explode("\n", trim($stdin->readAll())),
                 $list
             );
         }
@@ -95,15 +96,16 @@ class SelectableList
         Cursor::move('↑', count($this->_list));
         Cursor::save();
 
-        fclose($stdin);
-        $this->_stdin = Console::getStdin();
-        $read         = [$this->_stdin];
+        fclose(STDIN);
+        Console::setInput(new Input());
+        $this->_stdin = Console::getInput();
+        $read         = [$this->_stdin->getStream()->getStream()];
 
         while (true) {
             @stream_select($read, $write, $except, 30, 0);
 
             if (empty($read)) {
-                $read = [$this->_stdin];
+                $read = [$this->_stdin->getStream()->getStream()];
 
                 continue;
             }
@@ -158,7 +160,7 @@ class SelectableList
      */
     protected function _read($length = 512)
     {
-        return fread($this->_stdin, $length);
+        return $this->_stdin->read($length);
     }
 
     /**
@@ -222,4 +224,4 @@ class SelectableList
 Console::advancedInteraction(true);
 
 $list = new SelectableList();
-$list->select(range(1024, 1042));
+$list->select();
